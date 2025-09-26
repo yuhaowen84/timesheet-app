@@ -63,7 +63,7 @@ def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
         else:
             ot_rate = round(unit_val * rate_constants["OT 150%"], 2)
     else:
-        # negative or OFF/ADO logic falls back to ordinary + applicable loadings
+        # negative or OFF/ADO -> ordinary + applicable loading
         if day == "Saturday":
             ot_rate = round(unit_val * rate_constants["Sat Loading 50%"] + unit_val * rate_constants["Ordinary Hours"], 2)
         elif day == "Sunday":
@@ -76,7 +76,7 @@ def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
             else:
                 ot_rate = round(unit_val * rate_constants["Ordinary Hours"], 2)
 
-    # Penalty rate: floor(worked hours) only (default 8 if blank/invalid)
+    # Penalty hours: floor(worked), default 8 if blank/invalid
     worked_hours = parse_duration(values[4])
     if worked_hours == 0:
         worked_hours = 8
@@ -117,7 +117,7 @@ if start_date:
     any_ado = False
 
     with st.form("timesheet_form"):
-        st.caption("Enter rostered/actual times as HH:MM (e.g., 07:30) or 4-digit HHMM (e.g., 0730). Worked/Extra can be HH:MM or HHMM. Leave Worked blank to default to 8h.")
+        st.caption("Enter HH:MM (e.g., 07:30) or HHMM (e.g., 0730). Worked/Extra accept HH:MM or HHMM. Worked defaults to 8h if blank.")
 
         for i in range(14):
             date = start_date + timedelta(days=i)
@@ -139,37 +139,44 @@ if start_date:
             # Holiday flag
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # ---------- Unit logic ----------
+            # ---------- Unit (EXACT port of your Tkinter logic) ----------
             unit = 0.0
             if any(v.upper() in ["OFF", "ADO"] for v in values) or sick:
                 unit = 0.0
             else:
-                RS_ON = parse_time(values[0])
-                AS_ON = parse_time(values[1])
-                RS_OFF = parse_time(values[2])
-                AS_OFF = parse_time(values[3])
-                worked_f = parse_duration(values[4])
-                extra_f  = parse_duration(values[5])
+                RS_ON  = parse_time(values[0])  # R Sign-on
+                AS_ON  = parse_time(values[1])  # A Sign-on
+                RS_OFF = parse_time(values[2])  # R Sign-off
+                AS_OFF = parse_time(values[3])  # A Sign-off
+                worked_f = parse_duration(values[4])  # Worked
+                extra_f  = parse_duration(values[5])  # Extra
 
                 if RS_ON and RS_OFF and AS_ON and AS_OFF:
+                    # Create datetime objects with midnight rollover like your desktop code
                     rs_start = datetime.combine(date, RS_ON)
                     rs_end   = datetime.combine(date, RS_OFF)
-                    if RS_OFF <= RS_ON:
+                    if RS_OFF < RS_ON:
                         rs_end += timedelta(days=1)
 
                     as_start = datetime.combine(date, AS_ON)
                     as_end   = datetime.combine(date, AS_OFF)
-                    if AS_OFF <= AS_ON:
+                    if AS_OFF < AS_ON:
                         as_end += timedelta(days=1)
 
                     built_up = 0
-                    if as_start < rs_start:  # lift-up (early sign-on)
-                        delta = (rs_start - as_start).total_seconds() / 3600.0
-                    elif as_end > rs_end:    # lay-back (late sign-off)
-                        delta = (as_end - rs_end).total_seconds() / 3600.0
-                    elif as_start >= rs_start and as_end <= rs_end and (as_end - as_start) < (rs_end - rs_start):  # built-up
-                        delta = (rs_end - rs_start).total_seconds() / 3600.0 - 8
+                    if as_start < rs_start:  # early sign-on (lift-up)
+                        delta_dt = rs_end - as_end
+                        delta = delta_dt.total_seconds() / 3600
+                        # print("lift-up")
+                    elif as_end > rs_end:    # late sign-off (lay-back)
+                        delta_dt = as_start - rs_start
+                        delta = abs(delta_dt.total_seconds() / 3600)
+                        # print("lay-back")
+                    elif as_start >= rs_start and as_end <= rs_end and (as_end - as_start) < (rs_end - rs_start):  # built up
+                        delta_dt = rs_end - rs_start
+                        delta = abs(delta_dt.total_seconds() / 3600) - 8
                         built_up = 1
+                        # print("built-up")
                     else:
                         delta = 0.0
 
@@ -184,10 +191,9 @@ if start_date:
                 else:
                     unit = 0.0
 
-            # ---------- Penalty & Special ----------
+            # ---------- Penalty (same as original) ----------
             penalty = "No"
-            special = "No"
-            AS_ON = parse_time(values[1])
+            AS_ON  = parse_time(values[1])
             AS_OFF = parse_time(values[3])
             if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday", "Sunday"]:
                 m1 = AS_ON.hour * 60 + AS_ON.minute
@@ -201,8 +207,10 @@ if start_date:
                 elif m1 <= 1080 <= m2:
                     penalty = "Afternoon"
 
-            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and weekday not in ["Saturday","Sunday"]:
-                if (AS_ON and time(1,1) <= AS_ON <= time(3,59)) or (AS_OFF and time(1,1) <= AS_OFF <= time(3,59)):
+            # ---------- Special (same as original) ----------
+            special = "No"
+            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and weekday not in ["Saturday", "Sunday"]:
+                if (AS_ON and time(1, 1) <= AS_ON <= time(3, 59)) or (AS_OFF and time(1, 1) <= AS_OFF <= time(3, 59)):
                     special = "Yes"
 
             # ---------- Rates ----------
@@ -229,15 +237,18 @@ if start_date:
         ]
         df = pd.DataFrame(rows, columns=cols)
 
-        # Totals on numeric columns 13..19
-        totals = [df[c].astype(float).sum() for c in cols[13:]]
+        # Totals for numeric columns 13..19
+        totals = [pd.to_numeric(df[c], errors="coerce").fillna(0).sum() for c in cols[13:]]
+
         # Long fortnight deduction if no ADO anywhere
         if not any_ado:
-            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # 49.81842 * 8 * 0.5 ≈ 199.275
+            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # ≈ 199.275
             totals[-1] -= deduction
             st.warning(f"Applied long-fortnight deduction: -{deduction:.2f}")
 
-        total_row = ["TOTAL","","","","","","","","","", "", "", ""] + totals
+        # Format totals to 2 decimals
+        totals_fmt = [f"{t:.2f}" for t in totals]
+        total_row = ["TOTAL","","","","","","","","","", "", "", ""] + totals_fmt
         df.loc[len(df)] = total_row
 
         def highlight_total(row):
