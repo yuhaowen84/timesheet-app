@@ -1,8 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, time
+import math
 
-# --- Constants ---
+# ---------- Constants ----------
+NSW_PUBLIC_HOLIDAYS = {
+    "2025-01-01", "2025-01-27", "2025-04-18", "2025-04-19", "2025-04-20", "2025-04-21",
+    "2025-04-25", "2025-06-09", "2025-10-06", "2025-12-25", "2025-12-26"
+}
 rate_constants = {
     "Afternoon Shift": 4.84, "Night Shift": 5.69, "Early Morning": 4.84,
     "Special Loading": 5.69, "OT 150%": 74.72763, "OT 200%": 99.63684,
@@ -11,46 +16,79 @@ rate_constants = {
     "Sick With MC": 49.81842, "Ordinary Hours": 49.81842
 }
 
-def parse_time(text):
-    try:
-        if ":" in text:
+# ---------- Helpers ----------
+def parse_time(text: str):
+    text = (text or "").strip()
+    if not text:
+        return None
+    if ":" in text:
+        try:
             return datetime.strptime(text, "%H:%M").time()
-        elif text.isdigit() and len(text) in [3, 4]:
+        except:
+            return None
+    if text.isdigit() and len(text) in [3, 4]:
+        try:
             h = int(text[:-2]); m = int(text[-2:])
             return time(hour=h, minute=m)
-    except:
-        return None
+        except:
+            return None
     return None
 
-def parse_duration(text):
-    try:
-        if ":" in text:
+def parse_duration(text: str) -> float:
+    text = (text or "").strip()
+    if not text:
+        return 0
+    if ":" in text:
+        try:
             h, m = map(int, text.split(":"))
             return h + m / 60
-        elif text.isdigit():
+        except:
+            return 0
+    if text.isdigit():
+        try:
             h = int(text[:-2]); m = int(text[-2:])
             return h + m / 60
-    except:
-        return 0
+        except:
+            return 0
     return 0
 
 def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
+    # values: [rs_on, as_on, rs_off, as_off, worked, extra]
     ot_rate = 0
-    if values[0].upper() == "ADO":
+    if values[0].upper() == "ADO" and unit_val >= 0:
         ot_rate = round(unit_val * rate_constants["ADO Adjustment"], 2)
-    elif values[0].upper() not in ["OFF", "ADO"]:
+    elif values[0].upper() not in ["OFF", "ADO"] and unit_val >= 0:
         if day in ["Saturday", "Sunday"]:
             ot_rate = round(unit_val * rate_constants["OT 200%"], 2)
         else:
             ot_rate = round(unit_val * rate_constants["OT 150%"], 2)
+    else:
+        # negative or OFF/ADO logic falls back to ordinary + applicable loadings
+        if day == "Saturday":
+            ot_rate = round(unit_val * rate_constants["Sat Loading 50%"] + unit_val * rate_constants["Ordinary Hours"], 2)
+        elif day == "Sunday":
+            ot_rate = round(unit_val * rate_constants["Sun Loading 100%"] + unit_val * rate_constants["Ordinary Hours"], 2)
+        else:
+            if penalty_value in ["Afternoon", "Morning"]:
+                ot_rate = round(unit_val * rate_constants["Afternoon Shift"] + unit_val * rate_constants["Ordinary Hours"], 2)
+            elif penalty_value == "Night":
+                ot_rate = round(unit_val * rate_constants["Night Shift"] + unit_val * rate_constants["Ordinary Hours"], 2)
+            else:
+                ot_rate = round(unit_val * rate_constants["Ordinary Hours"], 2)
+
+    # Penalty rate: floor(worked hours) only (default 8 if blank/invalid)
+    worked_hours = parse_duration(values[4])
+    if worked_hours == 0:
+        worked_hours = 8
+    penalty_hours = math.floor(worked_hours)
 
     penalty_rate = 0
     if penalty_value == "Afternoon":
-        penalty_rate = round(8 * rate_constants["Afternoon Shift"], 2)
+        penalty_rate = round(penalty_hours * rate_constants["Afternoon Shift"], 2)
     elif penalty_value == "Night":
-        penalty_rate = round(8 * rate_constants["Night Shift"], 2)
+        penalty_rate = round(penalty_hours * rate_constants["Night Shift"], 2)
     elif penalty_value == "Morning":
-        penalty_rate = round(8 * rate_constants["Early Morning"], 2)
+        penalty_rate = round(penalty_hours * rate_constants["Early Morning"], 2)
 
     special_loading = round(rate_constants["Special Loading"], 2) if special_value == "Yes" else 0
     sick_rate = round(8 * rate_constants["Sick With MC"], 2) if sick else 0
@@ -69,8 +107,8 @@ def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
     daily_count = ot_rate + penalty_rate + special_loading + sick_rate + daily_rate + loading
     return ot_rate, penalty_rate, special_loading, sick_rate, daily_rate, loading, daily_count
 
-# --- Streamlit App ---
-st.title("📊 Timesheet Calculator (Grid Style with Totals)")
+# ---------- App ----------
+st.title("📊 Timesheet Calculator (14-day Fortnight • Web)")
 
 start_date = st.date_input("Select Start Date")
 
@@ -79,7 +117,8 @@ if start_date:
     any_ado = False
 
     with st.form("timesheet_form"):
-        st.markdown("### Timesheet Input")
+        st.caption("Enter rostered/actual times as HH:MM (e.g., 07:30) or 4-digit HHMM (e.g., 0730). Worked/Extra can be HH:MM or HHMM. Leave Worked blank to default to 8h.")
+
         for i in range(14):
             date = start_date + timedelta(days=i)
             weekday = date.strftime("%A")
@@ -92,44 +131,116 @@ if start_date:
             rs_off = c3.text_input("R Sign-off", key=f"rs_off_{i}")
             as_off = c4.text_input("A Sign-off", key=f"as_off_{i}")
             worked = c5.text_input("Worked", key=f"worked_{i}")
-            extra = c6.text_input("Extra", key=f"extra_{i}")
+            extra  = c6.text_input("Extra",  key=f"extra_{i}")
+            sick   = st.checkbox("Sick", key=f"sick_{i}")
 
-            sick = st.checkbox("Sick", key=f"sick_{i}")
+            values = [rs_on.strip(), as_on.strip(), rs_off.strip(), as_off.strip(), worked.strip(), extra.strip()]
 
-            values = [rs_on, as_on, rs_off, as_off, worked, extra]
-            unit = 0 if any(v.upper() in ["OFF","ADO"] for v in values) or sick else parse_duration(worked or "8") - 8 + parse_duration(extra or "0")
+            # Holiday flag
+            is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # penalty & special
-            penalty, special = "No", "No"
-            as_on_time = parse_time(as_on)
-            if as_on_time and not sick and weekday not in ["Saturday","Sunday"]:
-                if as_on_time.hour >= 18 or as_on_time.hour < 4: penalty="Night"
-                elif as_on_time.hour < 6: penalty="Morning"
-                elif 12 <= as_on_time.hour < 18: penalty="Afternoon"
-            if as_on_time and time(1,1) <= as_on_time <= time(3,59): special="Yes"
+            # ---------- Unit logic ----------
+            unit = 0.0
+            if any(v.upper() in ["OFF", "ADO"] for v in values) or sick:
+                unit = 0.0
+            else:
+                RS_ON = parse_time(values[0])
+                AS_ON = parse_time(values[1])
+                RS_OFF = parse_time(values[2])
+                AS_OFF = parse_time(values[3])
+                worked_f = parse_duration(values[4])
+                extra_f  = parse_duration(values[5])
 
-            ot, pr, sl, sr, dr, lr, dcount = calculate_row(weekday, values, sick, penalty, special, round(unit,2))
-            if any(v.upper()=="ADO" for v in values): any_ado = True
+                if RS_ON and RS_OFF and AS_ON and AS_OFF:
+                    rs_start = datetime.combine(date, RS_ON)
+                    rs_end   = datetime.combine(date, RS_OFF)
+                    if RS_OFF <= RS_ON:
+                        rs_end += timedelta(days=1)
 
-            rows.append([weekday, date_str, unit, penalty, special, ot, pr, sl, sr, dr, lr, dcount])
+                    as_start = datetime.combine(date, AS_ON)
+                    as_end   = datetime.combine(date, AS_OFF)
+                    if AS_OFF <= AS_ON:
+                        as_end += timedelta(days=1)
+
+                    built_up = 0
+                    if as_start < rs_start:  # lift-up (early sign-on)
+                        delta = (rs_start - as_start).total_seconds() / 3600.0
+                    elif as_end > rs_end:    # lay-back (late sign-off)
+                        delta = (as_end - rs_end).total_seconds() / 3600.0
+                    elif as_start >= rs_start and as_end <= rs_end and (as_end - as_start) < (rs_end - rs_start):  # built-up
+                        delta = (rs_end - rs_start).total_seconds() / 3600.0 - 8
+                        built_up = 1
+                    else:
+                        delta = 0.0
+
+                    if worked_f and built_up == 0:
+                        worked_use = worked_f
+                    elif worked_f and built_up == 1:
+                        worked_use = 8
+                    else:
+                        worked_use = 8
+
+                    unit = delta + (worked_use - 8) + (extra_f or 0)
+                else:
+                    unit = 0.0
+
+            # ---------- Penalty & Special ----------
+            penalty = "No"
+            special = "No"
+            AS_ON = parse_time(values[1])
+            AS_OFF = parse_time(values[3])
+            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday", "Sunday"]:
+                m1 = AS_ON.hour * 60 + AS_ON.minute
+                m2 = AS_OFF.hour * 60 + AS_OFF.minute
+                if m2 < m1:
+                    m2 += 1440
+                if 1080 <= m1 % 1440 <= 1439 or 0 <= m1 % 1440 <= 239:
+                    penalty = "Night"
+                elif 240 <= m1 % 1440 <= 330:
+                    penalty = "Morning"
+                elif m1 <= 1080 <= m2:
+                    penalty = "Afternoon"
+
+            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and weekday not in ["Saturday","Sunday"]:
+                if (AS_ON and time(1,1) <= AS_ON <= time(3,59)) or (AS_OFF and time(1,1) <= AS_OFF <= time(3,59)):
+                    special = "Yes"
+
+            # ---------- Rates ----------
+            ot, prate, sload, srate, drate, lrate, dcount = calculate_row(
+                weekday, values, sick, penalty, special, round(unit, 2)
+            )
+
+            if any(v.upper() == "ADO" for v in values):
+                any_ado = True
+
+            rows.append([
+                weekday, date_str, values[0], values[1], values[2], values[3], values[4], values[5],
+                "Yes" if sick else "No", f"{unit:.2f}", penalty, special, is_holiday,
+                ot, prate, sload, srate, lrate, drate, dcount
+            ])
 
         submitted = st.form_submit_button("Calculate")
 
     if submitted:
-        df = pd.DataFrame(rows, columns=[
-            "Weekday","Date","Unit","Penalty","Special",
-            "OT Rate","Penalty Rate","Special Ldg","Sick Rate","Daily Rate","Loading","Daily Count"
-        ])
+        cols = [
+            "Weekday","Date","R Sign-on","A Sign-on","R Sign-off","A Sign-off","Worked","Extra","Sick",
+            "Unit","Penalty","Special","Holiday",
+            "OT Rate","Penalty Rate","Special Ldg","Sick Rate","Loading","Daily Rate","Daily Count"
+        ]
+        df = pd.DataFrame(rows, columns=cols)
 
-        # Totals
-        totals = [df[c].sum() for c in df.columns[5:]]
+        # Totals on numeric columns 13..19
+        totals = [df[c].astype(float).sum() for c in cols[13:]]
+        # Long fortnight deduction if no ADO anywhere
         if not any_ado:
-            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8
+            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # 49.81842 * 8 * 0.5 ≈ 199.275
             totals[-1] -= deduction
             st.warning(f"Applied long-fortnight deduction: -{deduction:.2f}")
 
-        # Append totals row
-        total_row = ["TOTAL","", "", "", ""] + totals
+        total_row = ["TOTAL","","","","","","","","","", "", "", ""] + totals
         df.loc[len(df)] = total_row
 
-        st.dataframe(df, use_container_width=True)
+        def highlight_total(row):
+            return ['background-color: #d0ffd0' if row.name == len(df)-1 else '' for _ in row]
+
+        st.dataframe(df.style.apply(highlight_total, axis=1), use_container_width=True)
