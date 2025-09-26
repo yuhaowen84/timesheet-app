@@ -139,7 +139,7 @@ if start_date:
             # Holiday flag
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # ---------- Unit (EXACT port of your Tkinter logic) ----------
+            # ---------- Unit  ----------
             unit = 0.0
             if any(v.upper() in ["OFF", "ADO"] for v in values) or sick:
                 unit = 0.0
@@ -152,7 +152,7 @@ if start_date:
                 extra_f  = parse_duration(values[5])  # Extra
 
                 if RS_ON and RS_OFF and AS_ON and AS_OFF:
-                    # Create datetime objects with midnight rollover like your desktop code
+                    # Create datetime objects with midnight rollover
                     rs_start = datetime.combine(date, RS_ON)
                     rs_end   = datetime.combine(date, RS_OFF)
                     if RS_OFF < RS_ON:
@@ -191,7 +191,7 @@ if start_date:
                 else:
                     unit = 0.0
 
-            # ---------- Penalty (same as original) ----------
+            # ---------- Penalty  ----------
             penalty = "No"
             AS_ON  = parse_time(values[1])
             AS_OFF = parse_time(values[3])
@@ -207,7 +207,7 @@ if start_date:
                 elif m1 <= 1080 <= m2:
                     penalty = "Afternoon"
 
-            # ---------- Special (same as original) ----------
+            # ---------- Special  ----------
             special = "No"
             if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and weekday not in ["Saturday", "Sunday"]:
                 if (AS_ON and time(1, 1) <= AS_ON <= time(3, 59)) or (AS_OFF and time(1, 1) <= AS_OFF <= time(3, 59)):
@@ -224,7 +224,8 @@ if start_date:
             rows.append([
                 weekday, date_str, values[0], values[1], values[2], values[3], values[4], values[5],
                 "Yes" if sick else "No", f"{unit:.2f}", penalty, special, is_holiday,
-                ot, prate, sload, srate, lrate, drate, dcount
+                f"{ot:.2f}", f"{prate:.2f}", f"{sload:.2f}", f"{srate:.2f}",
+                f"{lrate:.2f}", f"{drate:.2f}", f"{dcount:.2f}"
             ])
 
         submitted = st.form_submit_button("Calculate")
@@ -242,14 +243,15 @@ if start_date:
 
         # Long fortnight deduction if no ADO anywhere
         if not any_ado:
-            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # ≈ 199.275
+            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # half of daily rate
             totals[-1] -= deduction
             st.warning(f"Applied long-fortnight deduction: -{deduction:.2f}")
 
         # Format totals to 2 decimals
         totals_fmt = [f"{t:.2f}" for t in totals]
-        total_row = ["TOTAL","","","","","","","","","", "", "", ""] + totals_fmt
+        total_row = ["TOTAL", "", "", "", "", "", "", "", "", "", "", "", ""] + totals_fmt
         df.loc[len(df)] = total_row
+
 
         def highlight_total(row):
             return ['background-color: #d0ffd0' if row.name == len(df)-1 else '' for _ in row]
