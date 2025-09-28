@@ -125,50 +125,34 @@ if start_date:
             date_str = date.strftime("%Y-%m-%d")
 
             st.markdown(f"**{weekday} {date_str}**")
-
-            # inputs + toggles in two rows to keep it tidy on mobile
             c1, c2, c3, c4, c5, c6 = st.columns(6)
-            rs_on = c1.text_input("Roster Sign-on", key=f"rs_on_{i}")
-            as_on = c2.text_input("Actual Sign-on", key=f"as_on_{i}")
-            rs_off = c3.text_input("Roster Sign-off", key=f"rs_off_{i}")
-            as_off = c4.text_input("Actual Sign-off", key=f"as_off_{i}")
-            worked = c5.text_input("Worked Hours", key=f"worked_{i}")
-            extra  = c6.text_input("Extra Drive",  key=f"extra_{i}")
+            rs_on = c1.text_input("R Sign-on", key=f"rs_on_{i}")
+            as_on = c2.text_input("A Sign-on", key=f"as_on_{i}")
+            rs_off = c3.text_input("R Sign-off", key=f"rs_off_{i}")
+            as_off = c4.text_input("A Sign-off", key=f"as_off_{i}")
+            worked = c5.text_input("Worked", key=f"worked_{i}")
+            extra  = c6.text_input("Extra",  key=f"extra_{i}")
+            sick   = st.checkbox("Sick", key=f"sick_{i}")
 
-            t1, t2, t3 = st.columns(3)
-            sick_chk = t1.checkbox("Sick", key=f"sick_{i}")
-            off_chk  = t2.checkbox("Off",  key=f"off_{i}")
-            ado_chk  = t3.checkbox("ADO",  key=f"ado_{i}")
-
-            # Raw values
             values = [rs_on.strip(), as_on.strip(), rs_off.strip(), as_off.strip(), worked.strip(), extra.strip()]
 
-            # Effective values with precedence: ADO > (Sick or Off) > none
-            effective_values = values.copy()
-            chosen_flag = None
-            if ado_chk:
-                effective_values[0] = "ADO"
-                chosen_flag = "ADO"
-            elif sick_chk or off_chk:
-                effective_values[0] = "OFF"
-                chosen_flag = "OFF"
-
-            # Holiday flag (for display only)
+            # Holiday flag
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # ---------- Unit ----------
+            # ---------- Unit  ----------
             unit = 0.0
-            if any(v.upper() in ["OFF", "ADO"] for v in effective_values) or sick_chk:
+            if any(v.upper() in ["OFF", "ADO"] for v in values) or sick:
                 unit = 0.0
             else:
-                RS_ON  = parse_time(effective_values[0])
-                AS_ON  = parse_time(effective_values[1])
-                RS_OFF = parse_time(effective_values[2])
-                AS_OFF = parse_time(effective_values[3])
-                worked_f = parse_duration(effective_values[4])
-                extra_f  = parse_duration(effective_values[5])
+                RS_ON  = parse_time(values[0])  # R Sign-on
+                AS_ON  = parse_time(values[1])  # A Sign-on
+                RS_OFF = parse_time(values[2])  # R Sign-off
+                AS_OFF = parse_time(values[3])  # A Sign-off
+                worked_f = parse_duration(values[4])  # Worked
+                extra_f  = parse_duration(values[5])  # Extra
 
                 if RS_ON and RS_OFF and AS_ON and AS_OFF:
+                    # Create datetime objects with midnight rollover
                     rs_start = datetime.combine(date, RS_ON)
                     rs_end   = datetime.combine(date, RS_OFF)
                     if RS_OFF < RS_ON:
@@ -181,12 +165,18 @@ if start_date:
 
                     built_up = 0
                     if as_start < rs_start:  # early sign-on (lift-up)
-                        delta = (rs_end - as_end).total_seconds() / 3600
+                        delta_dt = rs_end - as_end
+                        delta = delta_dt.total_seconds() / 3600
+                        # print("lift-up")
                     elif as_end > rs_end:    # late sign-off (lay-back)
-                        delta = abs((as_start - rs_start).total_seconds() / 3600)
-                    elif as_start >= rs_start and as_end <= rs_end and (as_end - as_start) < (rs_end - rs_start):  # built-up
-                        delta = abs((rs_end - rs_start).total_seconds() / 3600) - 8
+                        delta_dt = as_start - rs_start
+                        delta = abs(delta_dt.total_seconds() / 3600)
+                        # print("lay-back")
+                    elif as_start >= rs_start and as_end <= rs_end and (as_end - as_start) < (rs_end - rs_start):  # built up
+                        delta_dt = rs_end - rs_start
+                        delta = abs(delta_dt.total_seconds() / 3600) - 8
                         built_up = 1
+                        # print("built-up")
                     else:
                         delta = 0.0
 
@@ -201,11 +191,11 @@ if start_date:
                 else:
                     unit = 0.0
 
-            # ---------- Penalty ----------
+            # ---------- Penalty  ----------
             penalty = "No"
-            AS_ON  = parse_time(effective_values[1])
-            AS_OFF = parse_time(effective_values[3])
-            if not any(v.upper() in ["OFF", "ADO"] for v in effective_values) and not sick_chk and AS_ON and AS_OFF and weekday not in ["Saturday", "Sunday"]:
+            AS_ON  = parse_time(values[1])
+            AS_OFF = parse_time(values[3])
+            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday", "Sunday"]:
                 m1 = AS_ON.hour * 60 + AS_ON.minute
                 m2 = AS_OFF.hour * 60 + AS_OFF.minute
                 if m2 < m1:
@@ -217,27 +207,23 @@ if start_date:
                 elif m1 <= 1080 <= m2:
                     penalty = "Afternoon"
 
-            # ---------- Special ----------
+            # ---------- Special  ----------
             special = "No"
-            if not any(v.upper() in ["OFF", "ADO"] for v in effective_values) and not sick_chk and weekday not in ["Saturday", "Sunday"]:
+            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and weekday not in ["Saturday", "Sunday"]:
                 if (AS_ON and time(1, 1) <= AS_ON <= time(3, 59)) or (AS_OFF and time(1, 1) <= AS_OFF <= time(3, 59)):
                     special = "Yes"
 
             # ---------- Rates ----------
-            unit = round(unit, 2)  # round once before using/displaying
             ot, prate, sload, srate, drate, lrate, dcount = calculate_row(
-                weekday, effective_values, sick_chk, penalty, special, unit
+                weekday, values, sick, penalty, special, round(unit, 2)
             )
 
-            if ado_chk or any(v.upper() == "ADO" for v in effective_values):
+            if any(v.upper() == "ADO" for v in values):
                 any_ado = True
 
-            # Show chosen flag in "R Sign-on" for clarity
-            display_rs_on = chosen_flag if chosen_flag else values[0]
-
             rows.append([
-                weekday, date_str, display_rs_on, values[1], values[2], values[3], values[4], values[5],
-                "Yes" if sick_chk else "No", f"{unit:.2f}", penalty, special, is_holiday,
+                weekday, date_str, values[0], values[1], values[2], values[3], values[4], values[5],
+                "Yes" if sick else "No", f"{unit:.2f}", penalty, special, is_holiday,
                 f"{ot:.2f}", f"{prate:.2f}", f"{sload:.2f}", f"{srate:.2f}",
                 f"{lrate:.2f}", f"{drate:.2f}", f"{dcount:.2f}"
             ])
@@ -246,29 +232,28 @@ if start_date:
 
     if submitted:
         cols = [
-            "Weekday","Date","Rostered Sign-on","Actual Sign-on","Rostered Sign-off","Actual Sign-off","Worked Hours","Extra Drive","Sick",
+            "Weekday","Date","R Sign-on","A Sign-on","R Sign-off","A Sign-off","Worked","Extra","Sick",
             "Unit","Penalty","Special","Holiday",
-            "OT Rate","Penalty Rate","Special Loading","Sick Rate","Loading","Daily Rate","Daily Count"
+            "OT Rate","Penalty Rate","Special Ldg","Sick Rate","Loading","Daily Rate","Daily Count"
         ]
         df = pd.DataFrame(rows, columns=cols)
 
         # Totals for numeric columns 13..19
         totals = [pd.to_numeric(df[c], errors="coerce").fillna(0).sum() for c in cols[13:]]
 
-        # Long fortnight deduction if no ADO anywhere (including ADO checkbox)
+        # Long fortnight deduction if no ADO anywhere
         if not any_ado:
-            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # half of daily ordinary
+            deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # half of daily rate
             totals[-1] -= deduction
             st.warning(f"Applied long-fortnight deduction: -{deduction:.2f}")
 
-        # Format totals to 2 decimals + append TOTAL row
+        # Format totals to 2 decimals
         totals_fmt = [f"{t:.2f}" for t in totals]
         total_row = ["TOTAL", "", "", "", "", "", "", "", "", "", "", "", ""] + totals_fmt
         df.loc[len(df)] = total_row
+
 
         def highlight_total(row):
             return ['background-color: #d0ffd0' if row.name == len(df)-1 else '' for _ in row]
 
         st.dataframe(df.style.apply(highlight_total, axis=1), use_container_width=True)
-
-
