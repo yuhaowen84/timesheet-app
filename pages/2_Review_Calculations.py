@@ -31,7 +31,7 @@ for r in entries:
     elif sick or off:
         effective_values[0] = "OFF"; chosen_flag = "OFF"
 
-    # Unit (original logic)
+    # Unit calculation
     unit = 0.0
     if any(v.upper() in ["OFF","ADO"] for v in effective_values) or sick:
         unit = 0.0
@@ -64,8 +64,6 @@ for r in entries:
 
             worked_use = worked_f if worked_f and built_up == 0 else 8
             unit = delta + (worked_use - 8) + (extra_f or 0)
-        else:
-            unit = 0.0
 
     unit = round(unit, 2)
 
@@ -114,10 +112,10 @@ cols = [
 ]
 df = pd.DataFrame(rows, columns=cols)
 
-# Totals (as floats first)
+# Totals
 totals_float = [pd.to_numeric(df[c], errors="coerce").fillna(0).sum() for c in cols[13:]]
 
-# Long-fortnight deduction if no ADO anywhere
+# Long fortnight deduction
 if not any_ado:
     deduction = 0.5 * rate_constants["Ordinary Hours"] * 8
     totals_float[-1] -= deduction
@@ -126,6 +124,20 @@ if not any_ado:
 # TOTAL row
 totals_fmt = [f"{t:.2f}" for t in totals_float]
 df.loc[len(df)] = ["TOTAL","","","","","","","","","", "", "", ""] + totals_fmt
+
+# ----- 🎉 Summary message -----
+start_str = start_date.strftime("%Y-%m-%d")
+end_str = (start_date + timedelta(days=13)).strftime("%Y-%m-%d")
+total_amount = totals_float[-1]
+
+st.success(
+    f"🎉 Congrats! For this fortnight ({start_str} → {end_str}), "
+    f"you have earned:\n\n"
+    f"💰 **${total_amount:,.2f} AUD** before tax!"
+)
+
+st.markdown("---")
+st.subheader("Here is the detailed breakdown of earnings")
 
 def highlight_total(row):
     return ['background-color: #d0ffd0' if row.name == len(df)-1 else '' for _ in row]
