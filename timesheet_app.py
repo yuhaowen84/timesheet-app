@@ -125,9 +125,11 @@ if start_date:
         "Work":    ["" for _ in dates],
         "Extra":   ["" for _ in dates],
         "Sick":    [False for _ in dates],
+        "Off":     [False for _ in dates],   # NEW
+        "ADO":     [False for _ in dates],   # NEW
     })
 
-    st.caption("Tip: Enter times as HH:MM or HHMM. Leave Work blank to default to 8h.")
+    st.caption("Tip: Enter times as HH:MM or HHMM. Leave Work blank to default to 8h. Use Sick/Off/ADO toggles.")
     edited = st.data_editor(
         df_input,
         num_rows="fixed",
@@ -142,7 +144,9 @@ if start_date:
             "A Off":   st.column_config.TextColumn(width=90, help="Actual Sign-off (HH:MM or HHMM)"),
             "Work":    st.column_config.TextColumn(width=80, help="Total worked (blank→8)"),
             "Extra":   st.column_config.TextColumn(width=80, help="Extra time"),
-            "Sick":    st.column_config.CheckboxColumn(width=60),
+            "Sick":    st.column_config.CheckboxColumn(width=60, help="Counts like OFF with Sick rate"),
+            "Off":     st.column_config.CheckboxColumn(width=55, help='Acts as entering "OFF"'),
+            "ADO":     st.column_config.CheckboxColumn(width=60, help='Acts as entering "ADO"'),
         }
     )
 
@@ -165,16 +169,23 @@ if start_date:
                 str(r["Extra"] or "").strip(),
             ]
             sick = bool(r["Sick"])
+            off_toggle = bool(r["Off"])
+            ado_toggle = bool(r["ADO"])
 
-            # Apply "Sick implies OFF" for all downstream logic
+            # Effective values with precedence: ADO > Sick/Off > none
             effective_values = values.copy()
-            if sick:
+            chosen_flag = None
+            if ado_toggle:
+                effective_values[0] = "ADO"
+                chosen_flag = "ADO"
+            elif sick or off_toggle:
                 effective_values[0] = "OFF"
+                chosen_flag = "OFF"
 
             # Holiday
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # ---------- Unit (original logic; already treats 'sick' as OFF via effective_values) ----------
+            # ---------- Unit (original logic) ----------
             unit = 0.0
             if any(v.upper() in ["OFF", "ADO"] for v in effective_values) or sick:
                 unit = 0.0
@@ -252,8 +263,8 @@ if start_date:
             if any(v.upper() == "ADO" for v in effective_values):
                 any_ado = True
 
-            # Display "OFF" in the table when Sick is checked
-            display_rs_on = effective_values[0] if sick else values[0]
+            # Display in R On cell: chosen flag ("OFF"/"ADO") if set, else original
+            display_rs_on = chosen_flag if chosen_flag else values[0]
 
             # Store as strings with 2 decimals for display
             rows.append([
