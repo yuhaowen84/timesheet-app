@@ -62,19 +62,19 @@ left, mid, right = st.columns([1, 2, 1])
 with left:
     if st.button("⬅️ Previous", use_container_width=True, disabled=(day_index == 0)):
         st.session_state["day_index"] = max(0, day_index - 1)
-        st.experimental_rerun()
+        st.rerun()
 
 with mid:
     # day selector (0-based internal, 1-based display)
     idx = st.number_input("Day", min_value=1, max_value=14, value=day_index + 1, step=1, label_visibility="collapsed")
     if (idx - 1) != day_index:
         st.session_state["day_index"] = idx - 1
-        st.experimental_rerun()
+        st.rerun()
 
 with right:
     if st.button("Next ➡️", use_container_width=True, disabled=(day_index == total_days - 1)):
         st.session_state["day_index"] = min(total_days - 1, day_index + 1)
-        st.experimental_rerun()
+        st.rerun()
 
 # ---------- progress ----------
 done = progress_count()
@@ -137,7 +137,7 @@ if save or save_next:
     st.success(f"Saved {row['weekday']} ({row['date_str']}).")
     if save_next and day_index < total_days - 1:
         st.session_state["day_index"] = day_index + 1
-        st.experimental_rerun()
+        st.rerun()
 
 # footer nav
 nav_left, _, nav_right = st.columns([1,2,1])
@@ -150,3 +150,4 @@ with nav_right:
 
 st.markdown("---")
 st.info("When you finish all days, open **Review Calculations** from the sidebar to see totals and breakdown.")
+
