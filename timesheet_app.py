@@ -128,11 +128,11 @@ if start_date:
 
             # inputs + toggles in two rows to keep it tidy on mobile
             c1, c2, c3, c4, c5, c6 = st.columns(6)
-            rs_on = c1.text_input("Rostered Sign-on", key=f"rs_on_{i}")
+            rs_on = c1.text_input("Roster Sign-on", key=f"rs_on_{i}")
             as_on = c2.text_input("Actual Sign-on", key=f"as_on_{i}")
-            rs_off = c3.text_input("Rostered Sign-off", key=f"rs_off_{i}")
+            rs_off = c3.text_input("Roster Sign-off", key=f"rs_off_{i}")
             as_off = c4.text_input("Actual Sign-off", key=f"as_off_{i}")
-            worked = c5.text_input("Worked", key=f"worked_{i}")
+            worked = c5.text_input("Worked Hours", key=f"worked_{i}")
             extra  = c6.text_input("Extra Drive",  key=f"extra_{i}")
 
             t1, t2, t3 = st.columns(3)
@@ -270,4 +270,5 @@ if start_date:
             return ['background-color: #d0ffd0' if row.name == len(df)-1 else '' for _ in row]
 
         st.dataframe(df.style.apply(highlight_total, axis=1), use_container_width=True)
+
 
