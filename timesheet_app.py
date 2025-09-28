@@ -108,84 +108,83 @@ def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
     return ot_rate, penalty_rate, special_loading, sick_rate, daily_rate, loading, daily_count
 
 # ---------- App ----------
-st.title("📊 Timesheet Calculator (14-day Fortnight • Grid Input)")
+st.title("📊 Timesheet Calculator (14-day Fortnight • Row Layout)")
 
 start_date = st.date_input("Select Start Date")
 
 if start_date:
-    # Editable grid (one row per day)
-    dates = [start_date + timedelta(days=i) for i in range(14)]
-    df_input = pd.DataFrame({
-        "Weekday": [d.strftime("%A") for d in dates],
-        "Date":    [d.strftime("%Y-%m-%d") for d in dates],
-        "R On":    ["" for _ in dates],
-        "A On":    ["" for _ in dates],
-        "R Off":   ["" for _ in dates],
-        "A Off":   ["" for _ in dates],
-        "Work":    ["" for _ in dates],
-        "Extra":   ["" for _ in dates],
-        "Sick":    [False for _ in dates],
-        "Off":     [False for _ in dates],   # NEW
-        "ADO":     [False for _ in dates],   # NEW
-    })
+    st.caption("Enter times as HH:MM or HHMM. Worked blank→8h. Toggles: Sick acts like OFF; ADO overrides OFF/Sick.")
+    rows = []
+    any_ado = False
 
-    st.caption("Tip: Enter times as HH:MM or HHMM. Leave Work blank to default to 8h. Use Sick/Off/ADO toggles.")
-    edited = st.data_editor(
-        df_input,
-        num_rows="fixed",
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Weekday": st.column_config.Column(width=110, disabled=True),
-            "Date":    st.column_config.Column(width=110, disabled=True),
-            "R On":    st.column_config.TextColumn(width=90, help="Rostered Sign-on (HH:MM or HHMM)"),
-            "A On":    st.column_config.TextColumn(width=90, help="Actual Sign-on (HH:MM or HHMM)"),
-            "R Off":   st.column_config.TextColumn(width=90, help="Rostered Sign-off (HH:MM or HHMM)"),
-            "A Off":   st.column_config.TextColumn(width=90, help="Actual Sign-off (HH:MM or HHMM)"),
-            "Work":    st.column_config.TextColumn(width=80, help="Total worked (blank→8)"),
-            "Extra":   st.column_config.TextColumn(width=80, help="Extra time"),
-            "Sick":    st.column_config.CheckboxColumn(width=60, help="Counts like OFF with Sick rate"),
-            "Off":     st.column_config.CheckboxColumn(width=55, help='Acts as entering "OFF"'),
-            "ADO":     st.column_config.CheckboxColumn(width=60, help='Acts as entering "ADO"'),
-        }
-    )
+    # short labels for mobile
+    header = st.columns([1.6, 1, 1, 1, 1, 1, 1, 0.8, 0.7, 0.8])  # Weekday/Date, R On, A On, R Off, A Off, Work, Extra, Sick, Off, ADO
+    header[0].markdown("**Day**")
+    header[1].markdown("**R On**")
+    header[2].markdown("**A On**")
+    header[3].markdown("**R Off**")
+    header[4].markdown("**A Off**")
+    header[5].markdown("**Work**")
+    header[6].markdown("**Extra**")
+    header[7].markdown("**Sick**")
+    header[8].markdown("**Off**")
+    header[9].markdown("**ADO**")
+
+    # Collect inputs row-by-row
+    inputs = []
+    for i in range(14):
+        date = start_date + timedelta(days=i)
+        weekday = date.strftime("%A")
+        date_str = date.strftime("%Y-%m-%d")
+
+        cols = st.columns([1.6, 1, 1, 1, 1, 1, 1, 0.8, 0.7, 0.8])
+        cols[0].markdown(f"**{weekday}**<br><span style='font-size:0.9em;color:#888'>{date_str}</span>", unsafe_allow_html=True)
+        r_on  = cols[1].text_input("R On",  key=f"r_on_{i}",  label_visibility="collapsed")
+        a_on  = cols[2].text_input("A On",  key=f"a_on_{i}",  label_visibility="collapsed")
+        r_off = cols[3].text_input("R Off", key=f"r_off_{i}", label_visibility="collapsed")
+        a_off = cols[4].text_input("A Off", key=f"a_off_{i}", label_visibility="collapsed")
+        work  = cols[5].text_input("Work",  key=f"work_{i}",  label_visibility="collapsed")
+        extra = cols[6].text_input("Extra", key=f"ext_{i}",   label_visibility="collapsed")
+        sick  = cols[7].checkbox("Sick", key=f"sick_{i}", label_visibility="collapsed")
+        off_t = cols[8].checkbox("Off",  key=f"off_{i}",  label_visibility="collapsed")
+        ado_t = cols[9].checkbox("ADO",  key=f"ado_{i}",  label_visibility="collapsed")
+
+        inputs.append({
+            "weekday": weekday, "date": date, "date_str": date_str,
+            "r_on": r_on, "a_on": a_on, "r_off": r_off, "a_off": a_off,
+            "work": work, "extra": extra, "sick": sick, "off": off_t, "ado": ado_t
+        })
 
     if st.button("Calculate"):
-        rows = []
-        any_ado = False
+        for row in inputs:
+            weekday = row["weekday"]
+            date = row["date"]
+            date_str = row["date_str"]
 
-        for _, r in edited.iterrows():
-            weekday = str(r["Weekday"])
-            date_str = str(r["Date"])
-            date = datetime.strptime(date_str, "%Y-%m-%d").date()
-
-            # Raw values from grid
             values = [
-                str(r["R On"] or "").strip(),
-                str(r["A On"] or "").strip(),
-                str(r["R Off"] or "").strip(),
-                str(r["A Off"] or "").strip(),
-                str(r["Work"] or "").strip(),
-                str(r["Extra"] or "").strip(),
+                (row["r_on"] or "").strip(),
+                (row["a_on"] or "").strip(),
+                (row["r_off"] or "").strip(),
+                (row["a_off"] or "").strip(),
+                (row["work"] or "").strip(),
+                (row["extra"] or "").strip(),
             ]
-            sick = bool(r["Sick"])
-            off_toggle = bool(r["Off"])
-            ado_toggle = bool(r["ADO"])
+            sick = bool(row["sick"])
+            off_toggle = bool(row["off"])
+            ado_toggle = bool(row["ado"])
 
-            # Effective values with precedence: ADO > Sick/Off > none
+            # precedence: ADO > Sick/Off > none
             effective_values = values.copy()
             chosen_flag = None
             if ado_toggle:
-                effective_values[0] = "ADO"
-                chosen_flag = "ADO"
+                effective_values[0] = "ADO"; chosen_flag = "ADO"
             elif sick or off_toggle:
-                effective_values[0] = "OFF"
-                chosen_flag = "OFF"
+                effective_values[0] = "OFF"; chosen_flag = "OFF"
 
-            # Holiday
+            # Holiday flag
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # ---------- Unit (original logic) ----------
+            # ---- Unit (original logic) ----
             unit = 0.0
             if any(v.upper() in ["OFF", "ADO"] for v in effective_values) or sick:
                 unit = 0.0
@@ -230,18 +229,16 @@ if start_date:
                 else:
                     unit = 0.0
 
-            # Round once, then use everywhere
             unit = round(unit, 2)
 
-            # ---------- Penalty (use effective_values) ----------
+            # ---- Penalty (use effective values) ----
             penalty = "No"
             AS_ON  = parse_time(effective_values[1])
             AS_OFF = parse_time(effective_values[3])
-            if not any(v.upper() in ["OFF", "ADO"] for v in effective_values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday","Sunday"]:
+            if not any(v.upper() in ["OFF","ADO"] for v in effective_values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday","Sunday"]:
                 m1 = AS_ON.hour * 60 + AS_ON.minute
                 m2 = AS_OFF.hour * 60 + AS_OFF.minute
-                if m2 < m1:
-                    m2 += 1440
+                if m2 < m1: m2 += 1440
                 if 1080 <= m1 % 1440 <= 1439 or 0 <= m1 % 1440 <= 239:
                     penalty = "Night"
                 elif 240 <= m1 % 1440 <= 330:
@@ -249,24 +246,21 @@ if start_date:
                 elif m1 <= 1080 <= m2:
                     penalty = "Afternoon"
 
-            # ---------- Special (use effective_values) ----------
+            # ---- Special (use effective values) ----
             special = "No"
-            if not any(v.upper() in ["OFF", "ADO"] for v in effective_values) and not sick and weekday not in ["Saturday","Sunday"]:
+            if not any(v.upper() in ["OFF","ADO"] for v in effective_values) and not sick and weekday not in ["Saturday","Sunday"]:
                 if (AS_ON and time(1,1) <= AS_ON <= time(3,59)) or (AS_OFF and time(1,1) <= AS_OFF <= time(3,59)):
                     special = "Yes"
 
-            # ---------- Rates (use effective_values) ----------
+            # ---- Rates ----
             ot, prate, sload, srate, drate, lrate, dcount = calculate_row(
                 weekday, effective_values, sick, penalty, special, unit
             )
-
-            if any(v.upper() == "ADO" for v in effective_values):
+            if any(v.upper()=="ADO" for v in effective_values):
                 any_ado = True
 
-            # Display in R On cell: chosen flag ("OFF"/"ADO") if set, else original
             display_rs_on = chosen_flag if chosen_flag else values[0]
 
-            # Store as strings with 2 decimals for display
             rows.append([
                 weekday, date_str, display_rs_on, values[1], values[2], values[3], values[4], values[5],
                 "Yes" if sick else "No", f"{unit:.2f}", penalty, special, is_holiday,
@@ -274,7 +268,7 @@ if start_date:
                 f"{lrate:.2f}", f"{drate:.2f}", f"{dcount:.2f}"
             ])
 
-        # Build output table
+        # Output table
         cols = [
             "Weekday","Date","R On","A On","R Off","A Off","Work","Extra","Sick",
             "Unit","Penalty","Special","Holiday",
@@ -282,22 +276,19 @@ if start_date:
         ]
         df = pd.DataFrame(rows, columns=cols)
 
-        # Numeric totals: compute from floats (not the formatted strings)
+        # Totals from floats
         num_cols = cols[13:]
         totals_float = [pd.to_numeric(df[c], errors="coerce").fillna(0).sum() for c in num_cols]
 
-        # Long fortnight deduction if no ADO anywhere
+        # Long-fortnight deduction if no ADO anywhere
         if not any_ado:
             deduction = 0.5 * rate_constants["Ordinary Hours"] * 8  # ≈ 199.275
             totals_float[-1] -= deduction
             st.warning(f"Applied long-fortnight deduction: -{deduction:.2f}")
 
-        # Append TOTAL row as 2-decimal strings
         totals_fmt = [f"{t:.2f}" for t in totals_float]
-        total_row = ["TOTAL","","","","","","","","","", "", "", ""] + totals_fmt
-        df.loc[len(df)] = total_row
+        df.loc[len(df)] = ["TOTAL","","","","","","","","","", "", "", ""] + totals_fmt
 
-        # Highlight TOTAL row
         def highlight_total(row):
             return ['background-color: #d0ffd0' if row.name == len(df)-1 else '' for _ in row]
 
