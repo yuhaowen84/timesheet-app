@@ -77,9 +77,7 @@ def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
                 ot_rate = round(unit_val * rate_constants["Ordinary Hours"], 2)
 
     # Penalty hours: floor(worked), default 8 if blank/invalid
-    worked_hours = parse_duration(values[4])
-    if worked_hours == 0:
-        worked_hours = 8
+    worked_hours = parse_duration(values[4]) or 8
     penalty_hours = math.floor(worked_hours)
 
     penalty_rate = 0
@@ -107,6 +105,17 @@ def calculate_row(day, values, sick, penalty_value, special_value, unit_val):
     daily_count = ot_rate + penalty_rate + special_loading + sick_rate + daily_rate + loading
     return ot_rate, penalty_rate, special_loading, sick_rate, daily_rate, loading, daily_count
 
+# ---------- Mutual exclusivity callbacks ----------
+def _toggle_off(i: int):
+    # if Off was just turned on, turn ADO off for the same row
+    if st.session_state.get(f"off_{i}", False):
+        st.session_state[f"ado_{i}"] = False
+
+def _toggle_ado(i: int):
+    # if ADO was just turned on, turn Off off for the same row
+    if st.session_state.get(f"ado_{i}", False):
+        st.session_state[f"off_{i}"] = False
+
 # ---------- App ----------
 st.title("📊 Timesheet Calculator (14-day Fortnight • Web)")
 
@@ -126,7 +135,7 @@ if start_date:
 
             st.markdown(f"**{weekday} {date_str}**")
 
-            # inputs + toggles in two rows to keep it tidy on mobile
+            # Inputs row
             c1, c2, c3, c4, c5, c6 = st.columns(6)
             rs_on = c1.text_input("R Sign-on", key=f"rs_on_{i}")
             as_on = c2.text_input("A Sign-on", key=f"as_on_{i}")
@@ -135,10 +144,17 @@ if start_date:
             worked = c5.text_input("Worked", key=f"worked_{i}")
             extra  = c6.text_input("Extra",  key=f"extra_{i}")
 
+            # Toggles row (with mutual exclusivity Off <-> ADO)
             t1, t2, t3 = st.columns(3)
             sick_chk = t1.checkbox("Sick", key=f"sick_{i}")
-            off_chk  = t2.checkbox("Off",  key=f"off_{i}")
-            ado_chk  = t3.checkbox("ADO",  key=f"ado_{i}")
+            off_chk  = t2.checkbox("Off",  key=f"off_{i}", on_change=_toggle_off, args=(i,))
+            ado_chk  = t3.checkbox("ADO",  key=f"ado_{i}", on_change=_toggle_ado, args=(i,))
+
+            # Safety guard: if both somehow True at submit, enforce ADO > Off
+            if st.session_state.get(f"ado_{i}", False) and st.session_state.get(f"off_{i}", False):
+                st.session_state[f"off_{i}"] = False
+                off_chk = False
+                ado_chk = True
 
             # Raw values
             values = [rs_on.strip(), as_on.strip(), rs_off.strip(), as_off.strip(), worked.strip(), extra.strip()]
@@ -146,14 +162,14 @@ if start_date:
             # Effective values with precedence: ADO > (Sick or Off) > none
             effective_values = values.copy()
             chosen_flag = None
-            if ado_chk:
+            if st.session_state.get(f"ado_{i}", False):
                 effective_values[0] = "ADO"
                 chosen_flag = "ADO"
-            elif sick_chk or off_chk:
+            elif sick_chk or st.session_state.get(f"off_{i}", False):
                 effective_values[0] = "OFF"
                 chosen_flag = "OFF"
 
-            # Holiday flag (for display only)
+            # Display-only holiday flag
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
             # ---------- Unit ----------
@@ -229,7 +245,7 @@ if start_date:
                 weekday, effective_values, sick_chk, penalty, special, unit
             )
 
-            if ado_chk or any(v.upper() == "ADO" for v in effective_values):
+            if st.session_state.get(f"ado_{i}", False) or any(v.upper() == "ADO" for v in effective_values):
                 any_ado = True
 
             # Show chosen flag in "R Sign-on" for clarity
@@ -246,7 +262,7 @@ if start_date:
 
     if submitted:
         cols = [
-            "Weekday","Date","R Sign-on","A Sign-on","R Sign-off","A Sign-off","Worked","Extra","Sick",
+            "Weekday","Date","Rostered Sign-on","Actual Sign-on","Rostered Sign-off","Actual Sign-off","Worked Hours","Extra Drive","Sick",
             "Unit","Penalty","Special","Holiday",
             "OT Rate","Penalty Rate","Special Ldg","Sick Rate","Loading","Daily Rate","Daily Count"
         ]
