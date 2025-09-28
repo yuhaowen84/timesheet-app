@@ -262,7 +262,7 @@ if start_date:
 
     if submitted:
         cols = [
-            "Weekday","Date","Rostered Sign-on","Actual Sign-on","Rostered Sign-off","Actual Sign-off","Worked Hours","Extra Drive","Sick",
+            "Weekday","Date","R Sign-on","A Sign-on","R Sign-off","A Sign-off","Worked","Extra","Sick",
             "Unit","Penalty","Special","Holiday",
             "OT Rate","Penalty Rate","Special Ldg","Sick Rate","Loading","Daily Rate","Daily Count"
         ]
