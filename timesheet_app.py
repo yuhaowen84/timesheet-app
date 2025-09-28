@@ -113,7 +113,7 @@ st.title("📊 Timesheet Calculator (14-day Fortnight • Grid Input)")
 start_date = st.date_input("Select Start Date")
 
 if start_date:
-    # Build the editable grid (one row per day)
+    # Editable grid (one row per day)
     dates = [start_date + timedelta(days=i) for i in range(14)]
     df_input = pd.DataFrame({
         "Weekday": [d.strftime("%A") for d in dates],
@@ -155,7 +155,7 @@ if start_date:
             date_str = str(r["Date"])
             date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
-            # Values order matches your original functions
+            # Raw values from grid
             values = [
                 str(r["R On"] or "").strip(),
                 str(r["A On"] or "").strip(),
@@ -166,20 +166,25 @@ if start_date:
             ]
             sick = bool(r["Sick"])
 
-            # Holiday flag
+            # Apply "Sick implies OFF" for all downstream logic
+            effective_values = values.copy()
+            if sick:
+                effective_values[0] = "OFF"
+
+            # Holiday
             is_holiday = "Yes" if date_str in NSW_PUBLIC_HOLIDAYS else "No"
 
-            # ---------- Unit (original logic) ----------
+            # ---------- Unit (original logic; already treats 'sick' as OFF via effective_values) ----------
             unit = 0.0
-            if any(v.upper() in ["OFF", "ADO"] for v in values) or sick:
+            if any(v.upper() in ["OFF", "ADO"] for v in effective_values) or sick:
                 unit = 0.0
             else:
-                RS_ON  = parse_time(values[0])
-                AS_ON  = parse_time(values[1])
-                RS_OFF = parse_time(values[2])
-                AS_OFF = parse_time(values[3])
-                worked_f = parse_duration(values[4])
-                extra_f  = parse_duration(values[5])
+                RS_ON  = parse_time(effective_values[0])
+                AS_ON  = parse_time(effective_values[1])
+                RS_OFF = parse_time(effective_values[2])
+                AS_OFF = parse_time(effective_values[3])
+                worked_f = parse_duration(effective_values[4])
+                extra_f  = parse_duration(effective_values[5])
 
                 if RS_ON and RS_OFF and AS_ON and AS_OFF:
                     rs_start = datetime.combine(date, RS_ON)
@@ -214,14 +219,14 @@ if start_date:
                 else:
                     unit = 0.0
 
-            # Round unit once and use everywhere
+            # Round once, then use everywhere
             unit = round(unit, 2)
 
-            # ---------- Penalty (original) ----------
+            # ---------- Penalty (use effective_values) ----------
             penalty = "No"
-            AS_ON  = parse_time(values[1])
-            AS_OFF = parse_time(values[3])
-            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday","Sunday"]:
+            AS_ON  = parse_time(effective_values[1])
+            AS_OFF = parse_time(effective_values[3])
+            if not any(v.upper() in ["OFF", "ADO"] for v in effective_values) and not sick and AS_ON and AS_OFF and weekday not in ["Saturday","Sunday"]:
                 m1 = AS_ON.hour * 60 + AS_ON.minute
                 m2 = AS_OFF.hour * 60 + AS_OFF.minute
                 if m2 < m1:
@@ -233,23 +238,26 @@ if start_date:
                 elif m1 <= 1080 <= m2:
                     penalty = "Afternoon"
 
-            # ---------- Special (original) ----------
+            # ---------- Special (use effective_values) ----------
             special = "No"
-            if not any(v.upper() in ["OFF", "ADO"] for v in values) and not sick and weekday not in ["Saturday","Sunday"]:
+            if not any(v.upper() in ["OFF", "ADO"] for v in effective_values) and not sick and weekday not in ["Saturday","Sunday"]:
                 if (AS_ON and time(1,1) <= AS_ON <= time(3,59)) or (AS_OFF and time(1,1) <= AS_OFF <= time(3,59)):
                     special = "Yes"
 
-            # ---------- Rates ----------
+            # ---------- Rates (use effective_values) ----------
             ot, prate, sload, srate, drate, lrate, dcount = calculate_row(
-                weekday, values, sick, penalty, special, unit
+                weekday, effective_values, sick, penalty, special, unit
             )
 
-            if any(v.upper() == "ADO" for v in values):
+            if any(v.upper() == "ADO" for v in effective_values):
                 any_ado = True
+
+            # Display "OFF" in the table when Sick is checked
+            display_rs_on = effective_values[0] if sick else values[0]
 
             # Store as strings with 2 decimals for display
             rows.append([
-                weekday, date_str, values[0], values[1], values[2], values[3], values[4], values[5],
+                weekday, date_str, display_rs_on, values[1], values[2], values[3], values[4], values[5],
                 "Yes" if sick else "No", f"{unit:.2f}", penalty, special, is_holiday,
                 f"{ot:.2f}", f"{prate:.2f}", f"{sload:.2f}", f"{srate:.2f}",
                 f"{lrate:.2f}", f"{drate:.2f}", f"{dcount:.2f}"
@@ -263,7 +271,7 @@ if start_date:
         ]
         df = pd.DataFrame(rows, columns=cols)
 
-        # Numeric totals: sum using float conversion first
+        # Numeric totals: compute from floats (not the formatted strings)
         num_cols = cols[13:]
         totals_float = [pd.to_numeric(df[c], errors="coerce").fillna(0).sum() for c in num_cols]
 
@@ -273,7 +281,7 @@ if start_date:
             totals_float[-1] -= deduction
             st.warning(f"Applied long-fortnight deduction: -{deduction:.2f}")
 
-        # Append TOTAL row (2-decimal strings)
+        # Append TOTAL row as 2-decimal strings
         totals_fmt = [f"{t:.2f}" for t in totals_float]
         total_row = ["TOTAL","","","","","","","","","", "", "", ""] + totals_fmt
         df.loc[len(df)] = total_row
